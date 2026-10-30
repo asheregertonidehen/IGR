@@ -1,0 +1,188 @@
+# Training distribution, held-out suites and paired-event protocols.
+#
+# Sampling rule (code: sim/events.py, sensing/*): a range [lo, hi] at severity s
+# yields  value = clean + s * (U(lo, hi) - clean)  (clean = 0 except ext/ref rate
+# = 100/50 Hz and flow illumination = 1); probabilities are multiplied by s.
+# Per episode a mix category (clean, sensing-only, dynamics-only, both) gates the
+# sensing-severity and dynamics-severity independently.
+
+train:              # training distribution at s = 1 (curriculum ramps s 0 -> 1)
+  mix: [0.10, 0.30, 0.25, 0.35]
+  episode_s: 5.0
+  event_t: [0.5, 4.5]
+  term_vel: 3.0     # training-only velocity-error termination
+  drones: train
+  # tasks / initial state
+  task_probs: [0.4, 0.4, 0.0, 0.0, 0.2]   # hold, slow Langevin, fast Langevin, figure-8, moderate Langevin (x1.5)
+  fast_bw: [2.0, 3.0]
+  fig8_speed: [2.0, 4.0]
+  fig8_phase_lock_t: -1.0
+  init_at_target: 0.1
+  init_pos_l: 10.0
+  init_att_max: 1.5708
+  init_vel: [0.0, 1.0]
+  init_angvel_max: 1.0
+  # IMU (5.2) and Mahony (5.3)
+  gyro_noise: [0.002, 0.02]
+  gyro_bias: 0.02
+  gyro_rw: 1.0e-4
+  accel_noise: [0.02, 0.3]
+  accel_bias: 0.2
+  vib_k: [0.0, 1.0]
+  imu_scale_err: 0.03
+  imu_bias_mult: 1.0
+  vib_mult: 1.0
+  accel_noise_mult: 1.0
+  mahony_kp: [0.5, 2.0]
+  mahony_ki: [0.0, 0.1]
+  mahony_init_err_deg: 5.0
+  # external position / velocity links (5.4, 5.5)
+  ext_rate: [50.0, 100.0]
+  ext_delay: [0.0, 0.04]
+  ext_window: [0.0, 2.0]
+  ext_drop: [0.0, 0.05]
+  ext_freeze_prob: 0.3
+  ext_freeze_dur: [0.05, 0.3]       # <= 0.3 s (freeze_long 0.5-1.0 s stays held out)
+  ext_freeze_peak_frac: 0.5         # half of the freezes start at the peak reference acceleration
+  ext_burst_prob: 0.15              # training reorder bursts (x s), window <= 2, 0.3-1.0 s
+  ext_burst_delay: 0.0
+  ext_burst_window: [1.0, 2.0]
+  ext_burst_dur: [0.3, 1.0]
+  vel_outage_prob: 0.0
+  vel_outage_dur: [2.0, 5.0]
+  mocap_pos_noise: [0.001, 0.005]
+  mocap_vel_noise: [0.01, 0.05]
+  flow_prob: 0.3
+  flow_sigma0: [0.02, 0.05]
+  flow_light: [0.3, 1.0]
+  dark_prob: 0.3
+  dark_level: [0.1, 0.3]
+  dark_dur: [0.2, 1.0]
+  # reference stream ("planner" link)
+  ref_rate: [50.0, 50.0]
+  ref_delay: [0.0, 0.04]
+  ref_window: [0.0, 2.0]
+  ref_drop: [0.0, 0.05]
+  ref_freeze_prob: 0.0
+  ref_freeze_dur: [0.05, 0.2]
+  ref_freeze_peak_frac: 0.0
+  ref_burst_prob: 0.0
+  ref_burst_delay: 0.0
+  ref_burst_window: [0.0, 0.0]
+  ref_burst_dur: [0.3, 1.0]
+  # actuation transport delay (5.6)
+  act_delay: [0.0, 0.02]
+  # environment / vehicle events (5.7)
+  wind_W: [0.0, 3.0]
+  turb_frac: 0.3
+  gust_prob: 0.5
+  gust_G: [0.0, 0.15]
+  gust_dur: [0.3, 1.5]
+  payload_prob: 0.3
+  payload_dm: [0.0, 0.2]
+  motor_loss_prob: 0.0
+  motor_loss: [0.6, 0.8]
+  batt_sag: [0.0, 0.1]
+
+eval_defaults:      # applied to every evaluation suite before its overrides
+  episode_s: 20.0
+  event_t: [5.0, 15.0]
+  term_vel: 1.0e9   # eval crash = position / angular-rate / non-finite only (9.1)
+  drones: test
+
+nominal:            # base of every held-out suite: realistic sensors, no events
+  mix: [0.0, 0.0, 0.0, 1.0]
+  ext_delay: [0.0, 0.02]
+  ext_window: [0.0, 1.0]
+  ext_drop: [0.0, 0.02]
+  ext_freeze_prob: 0.0
+  ext_freeze_peak_frac: 0.0         # held-out freezes are placed uniformly (duration is the held-out factor)
+  ext_burst_prob: 0.0
+  flow_prob: 0.0
+  dark_prob: 0.0
+  ref_delay: [0.0, 0.02]
+  ref_window: [0.0, 1.0]
+  ref_drop: [0.0, 0.02]
+  act_delay: [0.0, 0.01]
+  wind_W: [0.0, 0.0]
+  gust_prob: 0.0
+  payload_prob: 0.0
+  batt_sag: [0.0, 0.05]
+
+suites:
+  # ---- selection / reference -------------------------------------------------
+  val_id:   {group: id, base: train, drones: val}        # the ONLY selection suite (checkpoints, lambda, EKF, tau)
+  test_id:  {group: test_id, base: train, drones: test}  # in-distribution reference, not used for selection
+  clean:    {group: clean, base: train, mix: [1.0, 0.0, 0.0, 0.0]}
+  # ---- held-out (never trained, never used for selection); family by design ---------
+  delay_60:          {group: heldout, family: S, ext_delay: [0.06, 0.06]}
+  delay_100:         {group: heldout, family: S, ext_delay: [0.10, 0.10]}
+  delay_150:         {group: heldout, family: S, ext_delay: [0.15, 0.15]}
+  delay_burst:       {group: heldout, family: S, ext_burst_prob: 1.0, ext_burst_delay: 0.2, ext_burst_dur: [0.3, 1.0],
+                      ext_burst_window: [0.0, 0.0]}
+  reorder_severe:    {group: heldout, family: S, ext_window: [4.0, 6.0]}
+  ref_late:          {group: heldout, family: S, ref_delay: [0.10, 0.10], ref_window: [4.0, 4.0], ref_drop: [0.2, 0.2]}
+  act_delay_40:      {group: heldout, family: A, act_delay: [0.04, 0.04]}
+  act_delay_60:      {group: heldout, family: A, act_delay: [0.06, 0.06]}
+  freeze_long:       {group: heldout, family: S, ext_freeze_prob: 1.0, ext_freeze_dur: [0.5, 1.0]}
+  low_rate:          {group: heldout, family: S, ext_rate: [5.0, 20.0]}
+  dropout_sustained: {group: heldout, family: S, vel_outage_prob: 1.0, vel_outage_dur: [2.0, 5.0]}
+  dark:              {group: heldout, family: S, flow_prob: 1.0, dark_prob: 1.0, dark_level: [0.0, 0.0], dark_dur: [3.0, 6.0]}
+  imu_bias_3x:       {group: heldout, family: S, imu_bias_mult: 3.0}
+  vibration_3x:      {group: heldout, family: S, vib_mult: 3.0}
+  wind_strong:       {group: heldout, family: D, wind_W: [5.0, 8.0], gust_prob: 1.0, gust_G: [0.15, 0.3]}
+  payload_40:        {group: heldout, family: D, payload_prob: 1.0, payload_dm: [0.2, 0.4]}
+  motor_loss:        {group: heldout, family: D, motor_loss_prob: 1.0}
+  high_t2w:          {group: heldout, family: D, drones: high_t2w}
+  fast_traj:         {group: heldout, family: K, task_probs: [0.0, 0.0, 1.0, 0.0, 0.0]}
+  figure8_fast:      {group: heldout, family: K, task_probs: [0.0, 0.0, 0.0, 1.0, 0.0]}
+  midair:            {group: heldout, family: K, ext_delay: [0.10, 0.10], init_vel: [2.0, 4.0], init_att_max: 3.1416,
+                      init_at_target: 0.0, init_angvel_max: 1.0}
+  combo_delay_gust:  {group: heldout, family: C, ext_delay: [0.10, 0.10], wind_W: [5.0, 8.0], gust_prob: 1.0, gust_G: [0.15, 0.3]}
+  combo_all:         {group: heldout, family: C, ext_delay: [0.10, 0.10], ext_window: [4.0, 6.0], ref_delay: [0.10, 0.10],
+                      ref_window: [4.0, 4.0], ref_drop: [0.2, 0.2], act_delay: [0.04, 0.04], ext_freeze_prob: 1.0,
+                      ext_freeze_dur: [0.5, 1.0], imu_bias_mult: 3.0, vib_mult: 3.0, wind_W: [5.0, 8.0],
+                      gust_prob: 1.0, gust_G: [0.15, 0.3], payload_prob: 1.0, payload_dm: [0.2, 0.4],
+                      motor_loss_prob: 1.0}
+  # ---- delay sweep for fig. 2 (descriptive; 60/100/150 are the held-out suites)
+  delay_0:  {group: sweep, ext_delay: [0.0, 0.0]}
+  delay_20: {group: sweep, ext_delay: [0.02, 0.02]}
+  delay_40: {group: sweep, ext_delay: [0.04, 0.04]}
+  delay_80: {group: sweep, ext_delay: [0.08, 0.08]}
+  # ---- descriptive / gates ---------------------------------------------------
+  named_platforms: {group: descriptive, base: train, drones: named}
+  gate_E:   {group: gate, base: train, drones: val, mix: [1.0, 0.0, 0.0, 0.0], task_probs: [0.5, 0.5, 0.0, 0.0, 0.0]}
+
+families:           # fixed by design (what each family perturbs)
+  S: sensing
+  A: actuation
+  D: dynamics
+  K: task and initial state
+  C: combined
+
+discrimination:     # paired counterfactual episodes; each episode also runs without the event
+  n_drones: 64
+  events: {E1: 1, E2: 2, E3: 3, E4: 4, E5: 5, E6: 6, E7: 7}
+  misleading: [E1, E4, E5]
+  real_change: [E2, E7]
+  event_window: {E1: 0.5, E2: 0.6, E3: 0.6, E4: 1.0, E5: 1.0, E6: 1.0, E7: 1.0}
+  post_window: 2.0          # tracking-error excess integrates over the event window + 2 s
+  pre_window: 2.0           # pre-event statistics for the head detection test
+  detect: {E2: [force, 0.5], E7: [t2w, 1.0]}
+  protocols:
+    primary:                # in distribution: moderate Langevin, event at the peak reference acceleration in [7, 9] s
+      base: nominal
+      task_probs: [0.0, 0.0, 0.0, 0.0, 1.0]
+      init_at_target: 1.0
+      episode_s: 14.0
+      event_t: [7.0, 9.0]
+      event_at_peak: 1.0
+    secondary:              # 3 m/s figure-8, event at 8 s at peak acceleration (out of distribution)
+      base: nominal
+      task_probs: [0.0, 0.0, 0.0, 1.0, 0.0]
+      fig8_speed: [3.0, 3.0]
+      fig8_phase_lock_t: 8.0
+      init_at_target: 1.0
+      episode_s: 14.0
+      event_t: [8.0, 8.0]
+      event_at_peak: 0.0

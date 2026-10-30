@@ -1,0 +1,50 @@
+# Run configuration. Budgets are fixed constants in env steps / epochs.
+eval_seed: 54321
+selection_seed: 777                 # val_id checkpoint, lambda, EKF/tau and gate selection only
+seeds:
+  teacher_seeds: [0, 1, 2]          # E_k, T_k
+  student_seeds_core: [0, 1]        # Full, A1, A3, A7, A9, B4, B5m -> 6 per variant
+  student_seeds_other: [0]          # -> 3 per variant (one per teacher seed)
+lambda_grid: [0.01, 0.03, 0.1, 0.3, 1.0]   # must equal models/variants.LAMBDA_GRID (checked)
+event_weight_beta: 4                       # normalized to mean 1 per batch
+teacher_width: {main: 3}                   # multiplier on the student cell (24/16/16)
+convergence: {window_frac: 0.2, success_pp: 2, rmse_pct: 5, extend_factor: 1.5, max_extensions: 0}
+classical_sweeps:                          # selected on val_id
+  ekf_nots: {process_noise_scale: [100, 1000, 10000], nominal_delay_ms: [0, 20, 40]}   # B5m
+selection_suite: val_id
+
+profiles:
+  full:
+    E:        {n_envs: 4096, rollout: 32, steps: 300000000}      # per seed, 3 seeds vmapped
+    T:        {n_envs: 2048, chunk: 64, steps: 500000000}        # per teacher model
+    # Student optimization, explicit for every student; missing keys stop the job. bptt is the backward window;
+    # IGR variants and A9 use 100 steps with carried state, the plain baselines (F2b) 500.
+    student:  {n_envs: 1024, epochs: 1000, ep_steps: 500, minibatch_seqs: 64, passes: 1, warmup_epochs: 10,
+               selection_ckpt_every_epochs: 100, bptt: 100, bptt_by_family: {F2b: 500}, lr: 1.0e-4, lr_final: 1.0e-4}
+    target_stats: {n_envs: 4096, steps: 500}
+    episodes_per_suite: 1024
+    eval_chunk: 512
+    gate_episodes: 512
+    selection_episodes: 256
+    probe_episodes: 256
+    event_drones: 64
+    unsolved_reps: 64
+    ckpt_every_s: 600
+    throttle_guard: true          # alert only; never changes training
+  smoke:                          # whole pipeline at tiny sizes on CPU (< ~15-20 min)
+    E:        {n_envs: 32, rollout: 16, steps: 1024}
+    T:        {n_envs: 16, chunk: 16, steps: 512}
+    student:  {n_envs: 4, epochs: 4, ep_steps: 32, minibatch_seqs: 2, passes: 1, warmup_epochs: 1,
+               selection_ckpt_every_epochs: 2, bptt: 8, lr: 1.0e-4, lr_final: 1.0e-4}
+    target_stats: {n_envs: 32, steps: 64}
+    episodes_per_suite: 4
+    eval_steps: 200
+    eval_chunk: 4
+    gate_episodes: 4
+    selection_episodes: 4
+    probe_episodes: 8
+    event_drones: 2
+    unsolved_reps: 1
+    apply_unsolved_mask: false   # smoke E solves nothing; the mask is computed, not applied
+    ckpt_every_s: 60
+    throttle_guard: false
